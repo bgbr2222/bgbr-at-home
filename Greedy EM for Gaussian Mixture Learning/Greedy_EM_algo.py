@@ -1,12 +1,19 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
+import sklearn.cluster
+import sklearn.mixture
 
 from GaussianMixtureModel import *
+
+# TODO add some comparison with scikit learn methods and update visualizations
+
 
 def main():
 
     np.random.seed(42)  # fix seed for test and debbug
+
+    max_terms = 20
 
     # random sample parameters
     num_clusters = 4
@@ -14,49 +21,88 @@ def main():
     cluster_size = 0.02
 
     randGMM = randomGMM(num_clusters, cluster_size)
-    print(randGMM)
+    # print(randGMM)
     xy_sample = randGMM.sample(num_samples)
 
     fitGMM = GMM()
-    fitGMM.greedyEMFit(xy_sample)
-    print(fitGMM)
+    fitGMM.greedyEMFit(xy_sample, max_components=max_terms)
+    #print(fitGMM)
 
-    # plotting
+    greedyGMM_cluster = np.array([np.argmin([scipy.spatial.distance.mahalanobis(
+        xy, fitGMM.mean[k], np.linalg.inv(fitGMM.cov[k])) for k in range(fitGMM.num_terms)]) for xy in xy_sample])
+    #print(greedyGMM_cluster)
 
-    fig, ax = plt.subplots()
+    # comparisons
 
-    X, Y = np.mgrid[-2:2:0.01, -2:2:0.01]
-    xy_grid = np.dstack((X, Y))
+    KMeans_conv_tol = 0.5
+    GM_conv_tol = 1e-2
 
-    # Z = sum(pi[j]*scipy.stats.multivariate_normal.pdf(xy_grid, m[j], S[j])/scipy.stats.multivariate_normal.pdf(m[j], m[j], S[j]) for j in range(0,k))
-    # Z = fitGMM.evaluate(xy_grid)
-    Z = sum(fitGMM.pi[j]*scipy.stats.multivariate_normal.pdf(xy_grid, fitGMM.mean[j], fitGMM.cov[j]) /
-            scipy.stats.multivariate_normal.pdf(fitGMM.mean[j], fitGMM.mean[j], fitGMM.cov[j]) for j in range(0, fitGMM.num_terms))
-    cs = ax.contour(X, Y, Z, cmap=plt.cm.YlOrRd)
-    # cbar = fig.colorbar(cs)
+    # sklearn KMeans
+    skKM_num_terms = 1
+    L_k_prev = 999
+    # print(kmeans.labels_)
+    while skKM_num_terms < max_terms:
+        
+        kmeans = sklearn.cluster.KMeans(
+            n_clusters=skKM_num_terms, random_state=42, n_init="auto").fit(xy_sample)
+        L_k = kmeans.inertia_
+        # print(L_k)
+        # print(abs(L_k/L_k_prev-1))
+        if abs(L_k/L_k_prev-1) < KMeans_conv_tol:
+            # print(skKM_num_terms)
+            break
+        L_k_prev = L_k
+        skKM_num_terms += 1
 
-    # Ztrue = sum(pia[j]*scipy.stats.multivariate_normal.pdf(xy_grid, ma[j], Sa[j])/scipy.stats.multivariate_normal.pdf(ma[j], ma[j], Sa[j]) for j in range(0,num_clusters))
-    # cstrue = ax.contour(X, Y, Ztrue, cmap=plt.cm.PuBuGn)
+    skKM_cluster = kmeans.labels_
+    # print(skKM_cluster)
 
+    # sklearn GM
+    skGM_num_terms = 1
+    L_k_prev = 999
+    while skGM_num_terms < max_terms:
+        
+        skGM = sklearn.mixture.GaussianMixture(
+            n_components=skGM_num_terms, random_state=42).fit(xy_sample)
+        L_k = skGM.score(xy_sample)
+        # print(L_k)
+        # print(abs(L_k/L_k_prev-1))
+        if abs(L_k/L_k_prev-1) < GM_conv_tol:
+            # print(skGM_num_terms)
+            break
+        L_k_prev = L_k
+        skGM_num_terms += 1
+
+    skGM_cluster = skGM.predict(xy_sample)
+    # print(skGM_cluster)
+
+    # # plotting
+
+    fig = plt.figure(figsize=(8, 3))
+
+    colors = ['b', 'g', 'r', 'c', 'm', 'y']
+    
+    # GreedyEM GM
+    ax = fig.add_subplot(1, 3, 1)
+    ax.scatter(xy_sample[:, 0], xy_sample[:, 1], color=[colors[ind] for ind in greedyGMM_cluster],
+                marker='.')  # , label='Target Samples')
+    ax.set_title(f"GreedyEM GM Algorithm\n({fitGMM.num_terms} terms)")
     ax.grid()
-    # colors = plt.cm.rainbow(np.linspace(0, 1, fitGMM.num_terms))
-    # print(colors)
-    # cc = np.zeros(len(xy_sample[:,0]))
-    # for i, row in enumerate(xy_sample):
-    #     cc[i] = colors[0]
 
+    #skGM
+    ax = fig.add_subplot(1, 3, 2)
+    ax.scatter(xy_sample[:, 0], xy_sample[:, 1], color=[colors[ind] for ind in skGM_cluster],
+                marker='.')  # , label='Target Samples')
+    ax.set_title(f"sklearn GM Algorithm\n({skGM_num_terms} terms)")
+    ax.grid()
 
-    ax.scatter(xy_sample[:, 0], xy_sample[:, 1], color='b',
-               marker='.', label='Target Samples')
-    # ax.scatter(t[0], t[1], c='k', marker='x', label='Actual Target')
-    # ax.scatter(s[0], s[1], c='k', marker='D', label='Source')
-    # ax.scatter(r[0], r[1], c='k', marker='s', label='Receiver')
-    # #ax.set_aspect('equal')
-    # ax.set_xlabel("x (km)")
-    # ax.set_ylabel("y (km)")
-    # legend = ax.legend(loc='lower center')
+    #skKM
+    ax = fig.add_subplot(1, 3, 3)
+    ax.scatter(xy_sample[:, 0], xy_sample[:, 1], color=[colors[ind] for ind in skKM_cluster],
+                marker='.')  # , label='Target Samples')
+    ax.set_title(f"sklearn KMeans Algorithm\n({skKM_num_terms} terms)")
+    ax.grid()
 
-    plt.axis('square')
     plt.show()
 
 
